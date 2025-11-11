@@ -569,6 +569,153 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
             // Best-effort; ignore errors
         }
     }
+
+    /**
+     * Handle PIN verification request from initiator
+     * Responder receives this and should prompt for PIN entry
+     */
+    suspend fun handlePinVerificationRequest(routed: RoutedPacket) {
+        val packet = routed.packet
+        val peerID = routed.peerID ?: "unknown"
+
+        Log.d(TAG, "Received PIN verification request from $peerID")
+
+        // Skip our own messages
+        if (peerID == myPeerID) return
+
+        try {
+            // Decode the PIN verification request from payload
+            val request = com.bitchat.android.security.PinVerificationRequest.decode(packet.payload)
+            if (request == null) {
+                Log.w(TAG, "Failed to decode PIN verification request from $peerID")
+                return
+            }
+
+            Log.d(TAG, "📌 PIN verification requested by ${request.initiatorPeerID}, session: ${request.sessionId}")
+
+            // Notify delegate to show PIN entry UI
+            delegate?.onPinVerificationRequested(request.sessionId, peerID)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling PIN verification request from $peerID: ${e.message}")
+        }
+    }
+
+    /**
+     * Handle PIN verification response from responder
+     * Initiator receives the entered PIN and validates it
+     */
+    suspend fun handlePinVerificationResponse(routed: RoutedPacket) {
+        val packet = routed.packet
+        val peerID = routed.peerID ?: "unknown"
+
+        Log.d(TAG, "Received PIN verification response from $peerID")
+
+        // Skip our own messages
+        if (peerID == myPeerID) return
+
+        try {
+            // Decode the PIN verification response from payload
+            val response = com.bitchat.android.security.PinVerificationResponse.decode(packet.payload)
+            if (response == null) {
+                Log.w(TAG, "Failed to decode PIN verification response from $peerID")
+                return
+            }
+
+            Log.d(TAG, "🔑 Received PIN response for session: ${response.sessionId}")
+
+            // Validate the PIN
+            val isValid = com.bitchat.android.security.PinVerificationManager.validatePin(
+                response.sessionId,
+                response.enteredPin
+            )
+
+            // Send result back to responder
+            sendPinVerificationResult(response.sessionId, peerID, isValid)
+
+            // Notify delegate
+            if (isValid) {
+                Log.d(TAG, "✅ PIN verified successfully for $peerID")
+                delegate?.onPinVerified(peerID, response.sessionId)
+            } else {
+                Log.d(TAG, "❌ Invalid PIN from $peerID")
+                delegate?.onPinVerificationFailed(peerID, response.sessionId, "Invalid PIN")
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling PIN verification response from $peerID: ${e.message}")
+        }
+    }
+
+    /**
+     * Handle PIN verification result from initiator
+     * Responder receives success/failure result
+     */
+    suspend fun handlePinVerificationResult(routed: RoutedPacket) {
+        val packet = routed.packet
+        val peerID = routed.peerID ?: "unknown"
+
+        Log.d(TAG, "Received PIN verification result from $peerID")
+
+        // Skip our own messages
+        if (peerID == myPeerID) return
+
+        try {
+            // Decode the PIN verification result from payload
+            val result = com.bitchat.android.security.PinVerificationResult.decode(packet.payload)
+            if (result == null) {
+                Log.w(TAG, "Failed to decode PIN verification result from $peerID")
+                return
+            }
+
+            Log.d(TAG, "🎯 PIN verification result for session ${result.sessionId}: ${if (result.success) "SUCCESS" else "FAILURE"}")
+
+            // Update local session state
+            if (result.success) {
+                com.bitchat.android.security.PinVerificationManager.markAsVerified(result.sessionId)
+            }
+
+            // Notify delegate
+            if (result.success) {
+                delegate?.onPinVerified(peerID, result.sessionId)
+            } else {
+                delegate?.onPinVerificationFailed(peerID, result.sessionId, result.errorMessage ?: "Verification failed")
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling PIN verification result from $peerID: ${e.message}")
+        }
+    }
+
+    /**
+     * Send PIN verification result to responder
+     */
+    private suspend fun sendPinVerificationResult(sessionId: String, recipientPeerID: String, success: Boolean) {
+        try {
+            val result = com.bitchat.android.security.PinVerificationResult(
+                sessionId = sessionId,
+                success = success,
+                errorMessage = if (success) null else "Invalid PIN"
+            )
+
+            val packet = BitchatPacket(
+                version = 1u,
+                type = MessageType.PIN_VERIFICATION_RESULT.value,
+                senderID = hexStringToByteArray(myPeerID),
+                recipientID = hexStringToByteArray(recipientPeerID),
+                timestamp = System.currentTimeMillis().toULong(),
+                payload = result.encode(),
+                signature = null,
+                ttl = com.bitchat.android.util.AppConstants.MESSAGE_TTL_HOPS
+            )
+
+            delegate?.sendPacket(packet)
+            Log.d(TAG, "📤 Sent PIN verification result to $recipientPeerID: ${if (success) "SUCCESS" else "FAILURE"}")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending PIN verification result: ${e.message}")
+        }
+    }
 }
 
 /**
@@ -611,4 +758,9 @@ interface MessageHandlerDelegate {
     fun onChannelLeave(channel: String, fromPeer: String)
     fun onDeliveryAckReceived(messageID: String, peerID: String)
     fun onReadReceiptReceived(messageID: String, peerID: String)
+
+    // PIN verification callbacks
+    fun onPinVerificationRequested(sessionId: String, initiatorPeerID: String)
+    fun onPinVerified(peerID: String, sessionId: String)
+    fun onPinVerificationFailed(peerID: String, sessionId: String, errorMessage: String)
 }

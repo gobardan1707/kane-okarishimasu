@@ -215,7 +215,20 @@ class MeshDelegateHandler(
     override fun isFavorite(peerID: String): Boolean {
         return privateChatManager.isFavorite(peerID)
     }
-    
+
+    // PIN verification callbacks - delegate to parent (ChatViewModel handles UI)
+    override fun onPinVerificationRequested(sessionId: String, initiatorPeerID: String) {
+        // This is handled by ChatViewModel directly
+    }
+
+    override fun onPinVerified(peerID: String, sessionId: String) {
+        // This is handled by ChatViewModel directly
+    }
+
+    override fun onPinVerificationFailed(peerID: String, sessionId: String, errorMessage: String) {
+        // This is handled by ChatViewModel directly
+    }
+
     /**
      * Check for mentions in mesh messages and trigger notifications
      */

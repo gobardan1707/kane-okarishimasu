@@ -60,6 +60,9 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val mentionSuggestions by viewModel.mentionSuggestions.observeAsState(emptyList())
     val showAppInfo by viewModel.showAppInfo.observeAsState(false)
 
+    // PIN verification state
+    val pinVerificationState by viewModel.pinVerificationUIState
+
     var messageText by remember { mutableStateOf(TextFieldValue("")) }
     var showPasswordPrompt by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
@@ -391,6 +394,40 @@ fun ChatScreen(viewModel: ChatViewModel) {
             initialIndex = initialViewerIndex,
             onClose = { showFullScreenImageViewer = false }
         )
+    }
+
+    // PIN Verification Dialogs
+    when (pinVerificationState.status) {
+        com.bitchat.android.security.PinVerificationStatus.PENDING_INITIATOR -> {
+            // Show PIN display dialog to initiator
+            if (pinVerificationState.pin != null && pinVerificationState.peerID != null) {
+                val peerNickname = viewModel.getPeerNickname(pinVerificationState.peerID!!)
+                    ?: pinVerificationState.peerID ?: "Unknown"
+
+                PinDisplayDialog(
+                    pin = pinVerificationState.pin!!,
+                    peerNickname = peerNickname,
+                    onDismiss = { viewModel.dismissPinVerification() }
+                )
+            }
+        }
+        com.bitchat.android.security.PinVerificationStatus.PENDING_RESPONDER -> {
+            // Show PIN entry dialog to responder
+            if (pinVerificationState.peerID != null) {
+                val initiatorNickname = viewModel.getPeerNickname(pinVerificationState.peerID!!)
+                    ?: pinVerificationState.peerID ?: "Unknown"
+
+                PinEntryDialog(
+                    initiatorNickname = initiatorNickname,
+                    errorMessage = pinVerificationState.errorMessage,
+                    onPinEntered = { pin -> viewModel.submitPin(pin) },
+                    onDismiss = { viewModel.dismissPinVerification() }
+                )
+            }
+        }
+        else -> {
+            // No PIN dialog needed
+        }
     }
 
     // Dialogs and Sheets

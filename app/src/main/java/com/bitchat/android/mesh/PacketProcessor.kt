@@ -155,6 +155,9 @@ class PacketProcessor(private val myPeerID: String) {
                         MessageType.NOISE_HANDSHAKE -> handleNoiseHandshake(routed)
                         MessageType.NOISE_ENCRYPTED -> handleNoiseEncrypted(routed)
                         MessageType.FILE_TRANSFER -> handleMessage(routed)
+                        MessageType.PIN_VERIFICATION_REQUEST -> handlePinVerificationRequest(routed)
+                        MessageType.PIN_VERIFICATION_RESPONSE -> handlePinVerificationResponse(routed)
+                        MessageType.PIN_VERIFICATION_RESULT -> handlePinVerificationResult(routed)
                         else -> {
                             validPacket = false
                             Log.w(TAG, "Unknown message type: ${packet.type}")
@@ -253,7 +256,34 @@ class PacketProcessor(private val myPeerID: String) {
 //        Log.d(TAG, "Processing delivery ACK from ${formatPeerForLog(peerID)}")
 //        delegate?.handleDeliveryAck(routed)
 //    }
-    
+
+    /**
+     * Handle PIN verification request
+     */
+    private suspend fun handlePinVerificationRequest(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing PIN verification request from ${formatPeerForLog(peerID)}")
+        delegate?.handlePinVerificationRequest(routed)
+    }
+
+    /**
+     * Handle PIN verification response
+     */
+    private suspend fun handlePinVerificationResponse(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing PIN verification response from ${formatPeerForLog(peerID)}")
+        delegate?.handlePinVerificationResponse(routed)
+    }
+
+    /**
+     * Handle PIN verification result
+     */
+    private suspend fun handlePinVerificationResult(routed: RoutedPacket) {
+        val peerID = routed.peerID ?: "unknown"
+        Log.d(TAG, "Processing PIN verification result from ${formatPeerForLog(peerID)}")
+        delegate?.handlePinVerificationResult(routed)
+    }
+
     /**
      * Get debug information
      */
@@ -318,7 +348,10 @@ interface PacketProcessorDelegate {
     fun handleLeave(routed: RoutedPacket)
     fun handleFragment(packet: BitchatPacket): BitchatPacket?
     fun handleRequestSync(routed: RoutedPacket)
-    
+    fun handlePinVerificationRequest(routed: RoutedPacket)
+    fun handlePinVerificationResponse(routed: RoutedPacket)
+    fun handlePinVerificationResult(routed: RoutedPacket)
+
     // Communication
     fun sendAnnouncementToPeer(peerID: String)
     fun sendCachedMessages(peerID: String)

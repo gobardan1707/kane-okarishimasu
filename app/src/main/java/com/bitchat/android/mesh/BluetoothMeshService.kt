@@ -362,9 +362,25 @@ class BluetoothMeshService(private val context: Context) {
             override fun onDeliveryAckReceived(messageID: String, peerID: String) {
                 delegate?.didReceiveDeliveryAck(messageID, peerID)
             }
-            
+
             override fun onReadReceiptReceived(messageID: String, peerID: String) {
                 delegate?.didReceiveReadReceipt(messageID, peerID)
+            }
+
+            // PIN verification callbacks
+            override fun onPinVerificationRequested(sessionId: String, initiatorPeerID: String) {
+                Log.d(TAG, "PIN verification requested by $initiatorPeerID, session: $sessionId")
+                delegate?.onPinVerificationRequested(sessionId, initiatorPeerID)
+            }
+
+            override fun onPinVerified(peerID: String, sessionId: String) {
+                Log.d(TAG, "PIN verified for peer $peerID, session: $sessionId")
+                delegate?.onPinVerified(peerID, sessionId)
+            }
+
+            override fun onPinVerificationFailed(peerID: String, sessionId: String, errorMessage: String) {
+                Log.d(TAG, "PIN verification failed for peer $peerID: $errorMessage")
+                delegate?.onPinVerificationFailed(peerID, sessionId, errorMessage)
             }
         }
         
@@ -472,6 +488,18 @@ class BluetoothMeshService(private val context: Context) {
                 val req = RequestSyncPacket.decode(routed.packet.payload) ?: return
                 gossipSyncManager.handleRequestSync(fromPeer, req)
             }
+
+            override fun handlePinVerificationRequest(routed: RoutedPacket) {
+                serviceScope.launch { messageHandler.handlePinVerificationRequest(routed) }
+            }
+
+            override fun handlePinVerificationResponse(routed: RoutedPacket) {
+                serviceScope.launch { messageHandler.handlePinVerificationResponse(routed) }
+            }
+
+            override fun handlePinVerificationResult(routed: RoutedPacket) {
+                serviceScope.launch { messageHandler.handlePinVerificationResult(routed) }
+            }
         }
         
         // BluetoothConnectionManager delegates
@@ -514,6 +542,15 @@ class BluetoothMeshService(private val context: Context) {
                         com.bitchat.android.ui.debug.DebugSettingsManager.getInstance()
                             .logPeerDisconnection(peer, nick, addr)
                     } catch (_: Exception) { }
+
+                    // Clean up PIN verification sessions for this connection
+                    try {
+                        com.bitchat.android.security.PinVerificationManager.removeConnectionSessions(addr)
+                        com.bitchat.android.security.PinVerificationManager.removePeerSessions(peer)
+                        Log.d(TAG, "Cleaned up PIN sessions for disconnected peer: $peer ($addr)")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error cleaning up PIN sessions: ${e.message}")
+                    }
                 }
             }
             
@@ -845,7 +882,102 @@ class BluetoothMeshService(private val context: Context) {
             }
         }
     }
-    
+
+    /**
+     * Initiate PIN verification for a peer connection
+     * Called by PrivateChatManager when starting chat with a new peer
+     *
+     * @param responderPeerID The peer who must enter the PIN
+     * @return The generated PIN session, or null if failed
+     */
+    fun initiatePinVerification(responderPeerID: String): com.bitchat.android.security.PinSession? {
+        // Get the connection address for this peer
+        val connectionAddress = connectionManager.addressPeerMap.entries
+            .firstOrNull { it.value == responderPeerID }
+            ?.key
+
+        if (connectionAddress == null) {
+            Log.w(TAG, "Cannot initiate PIN verification - no direct connection to $responderPeerID")
+            return null
+        }
+
+        // Create PIN session
+        val session = com.bitchat.android.security.PinVerificationManager.createSession(
+            connectionAddress = connectionAddress,
+            initiatorPeerID = myPeerID,
+            responderPeerID = responderPeerID
+        )
+
+        Log.d(TAG, "📌 Initiated PIN verification with $responderPeerID, PIN: ${session.pin}, session: ${session.sessionId}")
+
+        // Send PIN verification request
+        serviceScope.launch {
+            try {
+                val request = com.bitchat.android.security.PinVerificationRequest(
+                    sessionId = session.sessionId,
+                    initiatorPeerID = myPeerID,
+                    timestamp = System.currentTimeMillis()
+                )
+
+                val packet = BitchatPacket(
+                    version = 1u,
+                    type = MessageType.PIN_VERIFICATION_REQUEST.value,
+                    senderID = hexStringToByteArray(myPeerID),
+                    recipientID = hexStringToByteArray(responderPeerID),
+                    timestamp = System.currentTimeMillis().toULong(),
+                    payload = request.encode(),
+                    signature = null,
+                    ttl = com.bitchat.android.util.AppConstants.MESSAGE_TTL_HOPS
+                )
+
+                connectionManager.broadcastPacket(RoutedPacket(packet))
+                Log.d(TAG, "📤 Sent PIN verification request to $responderPeerID")
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send PIN verification request: ${e.message}")
+            }
+        }
+
+        return session
+    }
+
+    /**
+     * Send PIN verification response to initiator
+     * Called when responder enters the PIN
+     *
+     * @param sessionId The session ID from the request
+     * @param enteredPin The PIN entered by the responder
+     * @param initiatorPeerID The peer who initiated verification
+     */
+    fun sendPinVerificationResponse(sessionId: String, enteredPin: String, initiatorPeerID: String) {
+        serviceScope.launch {
+            try {
+                val response = com.bitchat.android.security.PinVerificationResponse(
+                    sessionId = sessionId,
+                    enteredPin = enteredPin,
+                    responderPeerID = myPeerID
+                )
+
+                val packet = BitchatPacket(
+                    version = 1u,
+                    type = MessageType.PIN_VERIFICATION_RESPONSE.value,
+                    senderID = hexStringToByteArray(myPeerID),
+                    recipientID = hexStringToByteArray(initiatorPeerID),
+                    timestamp = System.currentTimeMillis().toULong(),
+                    payload = response.encode(),
+                    signature = null,
+                    ttl = com.bitchat.android.util.AppConstants.MESSAGE_TTL_HOPS
+                )
+
+                connectionManager.broadcastPacket(RoutedPacket(packet))
+                Log.d(TAG, "📤 Sent PIN verification response to $initiatorPeerID")
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send PIN verification response: ${e.message}")
+            }
+        }
+    }
+
     /**
      * Send broadcast announce with TLV-encoded identity announcement - exactly like iOS
      */
@@ -1186,4 +1318,9 @@ interface BluetoothMeshDelegate {
     fun getNickname(): String?
     fun isFavorite(peerID: String): Boolean
     // registerPeerPublicKey REMOVED - fingerprints now handled centrally in PeerManager
+
+    // PIN verification callbacks
+    fun onPinVerificationRequested(sessionId: String, initiatorPeerID: String)
+    fun onPinVerified(peerID: String, sessionId: String)
+    fun onPinVerificationFailed(peerID: String, sessionId: String, errorMessage: String)
 }

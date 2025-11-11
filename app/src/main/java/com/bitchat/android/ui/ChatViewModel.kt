@@ -49,6 +49,12 @@ class ChatViewModel(
     // MARK: - State management
     private val state = ChatState()
 
+    // PIN verification state
+    private val _pinVerificationUIState = androidx.compose.runtime.mutableStateOf(
+        com.bitchat.android.security.PinVerificationUIState()
+    )
+    val pinVerificationUIState: androidx.compose.runtime.State<com.bitchat.android.security.PinVerificationUIState> = _pinVerificationUIState
+
     // Transfer progress tracking
     private val transferMessageMap = mutableMapOf<String, String>()
     private val messageTransferMap = mutableMapOf<String, String>()
@@ -297,7 +303,27 @@ class ChatViewModel(
         if (peerID.startsWith("nostr_")) {
             ensureGeohashDMSubscriptionIfNeeded(peerID)
         }
-        
+
+        // Check if PIN verification is required
+        if (privateChatManager.requiresPinVerification(peerID, meshService)) {
+            Log.d(TAG, "PIN verification required for $peerID - initiating")
+
+            // Initiate PIN verification
+            val session = privateChatManager.initiatePinVerification(peerID, meshService)
+            if (session != null) {
+                // Show PIN display dialog
+                _pinVerificationUIState.value = com.bitchat.android.security.PinVerificationUIState(
+                    status = com.bitchat.android.security.PinVerificationStatus.PENDING_INITIATOR,
+                    pin = session.pin,
+                    peerID = peerID
+                )
+                Log.d(TAG, "Showing PIN ${session.pin} for verification with $peerID")
+            } else {
+                Log.e(TAG, "Failed to initiate PIN verification for $peerID")
+            }
+            return
+        }
+
         val success = privateChatManager.startPrivateChat(peerID, meshService)
         if (success) {
             // Notify notification manager about current private chat
@@ -324,6 +350,53 @@ class ChatViewModel(
         setCurrentPrivateChatPeer(null)
         // Clear mesh mention notifications since user is now back in mesh chat
         clearMeshMentionNotifications()
+    }
+
+    // MARK: - PIN Verification
+
+    /**
+     * Submit PIN entered by responder
+     */
+    fun submitPin(enteredPin: String) {
+        val currentState = _pinVerificationUIState.value
+        val initiatorPeerID = currentState.peerID
+
+        if (initiatorPeerID == null) {
+            Log.e(TAG, "Cannot submit PIN - no initiator peer ID")
+            return
+        }
+
+        // Get the session ID from PinVerificationManager
+        val session = com.bitchat.android.security.PinVerificationManager.getSessionForPeer(meshService.myPeerID)
+        val sessionId = session?.sessionId
+
+        if (sessionId == null) {
+            Log.e(TAG, "Cannot submit PIN - no active session found")
+            _pinVerificationUIState.value = currentState.copy(
+                errorMessage = "No active verification session"
+            )
+            return
+        }
+
+        Log.d(TAG, "Submitting PIN for session $sessionId to $initiatorPeerID")
+
+        // Send PIN response to initiator
+        meshService.sendPinVerificationResponse(sessionId, enteredPin, initiatorPeerID)
+    }
+
+    /**
+     * Dismiss PIN verification dialog
+     */
+    fun dismissPinVerification() {
+        Log.d(TAG, "Dismissing PIN verification")
+        _pinVerificationUIState.value = com.bitchat.android.security.PinVerificationUIState()
+    }
+
+    /**
+     * Get peer nickname from mesh service
+     */
+    fun getPeerNickname(peerID: String): String? {
+        return meshService.getPeerInfo(peerID)?.nickname
     }
 
     // MARK: - Open Latest Unread Private Chat
@@ -719,9 +792,51 @@ class ChatViewModel(
     override fun isFavorite(peerID: String): Boolean {
         return meshDelegateHandler.isFavorite(peerID)
     }
-    
+
+    // PIN verification callbacks
+    override fun onPinVerificationRequested(sessionId: String, initiatorPeerID: String) {
+        Log.d(TAG, "PIN verification requested by $initiatorPeerID, session: $sessionId")
+
+        // Update UI state to show PIN entry dialog
+        _pinVerificationUIState.value = com.bitchat.android.security.PinVerificationUIState(
+            status = com.bitchat.android.security.PinVerificationStatus.PENDING_RESPONDER,
+            peerID = initiatorPeerID,
+            errorMessage = null
+        )
+    }
+
+    override fun onPinVerified(peerID: String, sessionId: String) {
+        Log.d(TAG, "PIN verified for peer $peerID")
+
+        // Clear PIN UI state
+        _pinVerificationUIState.value = com.bitchat.android.security.PinVerificationUIState(
+            status = com.bitchat.android.security.PinVerificationStatus.VERIFIED,
+            peerID = peerID
+        )
+
+        // If this was the peer we're trying to chat with, now start the chat
+        viewModelScope.launch {
+            delay(500) // Brief delay to show success
+            _pinVerificationUIState.value = com.bitchat.android.security.PinVerificationUIState()
+
+            // Retry starting private chat now that verification is complete
+            if (privateChatManager.startPrivateChat(peerID, meshService)) {
+                Log.d(TAG, "Successfully started chat with verified peer $peerID")
+            }
+        }
+    }
+
+    override fun onPinVerificationFailed(peerID: String, sessionId: String, errorMessage: String) {
+        Log.d(TAG, "PIN verification failed for peer $peerID: $errorMessage")
+
+        // Update UI state to show error
+        _pinVerificationUIState.value = _pinVerificationUIState.value.copy(
+            errorMessage = errorMessage
+        )
+    }
+
     // registerPeerPublicKey REMOVED - fingerprints now handled centrally in PeerManager
-    
+
     // MARK: - Emergency Clear
     
     fun panicClearAllData() {

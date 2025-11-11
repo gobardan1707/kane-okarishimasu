@@ -55,6 +55,14 @@ class PrivateChatManager(
             return false
         }
 
+        // Check if PIN verification is required for this peer
+        if (requiresPinVerification(peerID, meshService)) {
+            Log.d(TAG, "PIN verification required for $peerID - initiating verification")
+            // PIN verification will be handled by ChatViewModel
+            // Return false to indicate chat is not ready yet
+            return false
+        }
+
         // Establish Noise session if needed before starting the chat
         establishNoiseSessionIfNeeded(peerID, meshService)
 
@@ -77,6 +85,54 @@ class PrivateChatManager(
         return true
     }
 
+    /**
+     * Check if a peer requires PIN verification before starting chat
+     * PIN is required for new connections (peers not yet verified in this session)
+     *
+     * @param peerID The peer to check
+     * @param meshService The mesh service
+     * @return true if PIN verification is required
+     */
+    fun requiresPinVerification(peerID: String, meshService: BluetoothMeshService): Boolean {
+        // Check if peer has a direct connection (is directly connected via Bluetooth)
+        // If not directly connected, no PIN verification needed (can only chat via relay, which we don't support PIN for)
+        val hasDirectConnection = meshService.connectionManager.addressPeerMap.values.contains(peerID)
+        if (!hasDirectConnection) {
+            Log.d(TAG, "No direct connection to $peerID, PIN verification not required")
+            return false
+        }
+
+        // Check if peer is already verified
+        val isVerified = com.bitchat.android.security.PinVerificationManager.isVerified(peerID)
+        if (isVerified) {
+            Log.d(TAG, "Peer $peerID already verified")
+            return false
+        }
+
+        // Check if verification is already in progress
+        val hasPendingSession = com.bitchat.android.security.PinVerificationManager.getSessionForPeer(peerID) != null
+        if (hasPendingSession) {
+            Log.d(TAG, "PIN verification already in progress for $peerID")
+            return false
+        }
+
+        // New direct connection - requires PIN verification
+        Log.d(TAG, "New connection to $peerID requires PIN verification")
+        return true
+    }
+
+    /**
+     * Initiate PIN verification for a peer
+     * Should be called by UI when starting chat with a peer that requires verification
+     *
+     * @param peerID The peer to verify
+     * @param meshService The mesh service
+     * @return The PIN session, or null if failed
+     */
+    fun initiatePinVerification(peerID: String, meshService: BluetoothMeshService): com.bitchat.android.security.PinSession? {
+        return meshService.initiatePinVerification(peerID)
+    }
+
     fun endPrivateChat() {
         state.setSelectedPrivateChatPeer(null)
     }
@@ -97,6 +153,20 @@ class PrivateChatManager(
                 isRelay = false
             )
             messageManager.addMessage(systemMessage)
+            return false
+        }
+
+        // Check if peer requires PIN verification
+        val requiresVerification = com.bitchat.android.security.PinVerificationManager.requiresVerification(peerID)
+        if (requiresVerification) {
+            val systemMessage = BitchatMessage(
+                sender = "system",
+                content = "cannot send message: PIN verification required.",
+                timestamp = Date(),
+                isRelay = false
+            )
+            messageManager.addMessage(systemMessage)
+            Log.w(TAG, "Attempted to send message to unverified peer: $peerID")
             return false
         }
 
