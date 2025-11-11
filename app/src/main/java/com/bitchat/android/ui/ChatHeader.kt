@@ -584,10 +584,10 @@ private fun MainHeader(
 
             // Location channels button (matching iOS implementation) and bookmark grouped tightly
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 4.dp)) {
-                LocationChannelsButton(
+               /* LocationChannelsButton(
                     viewModel = viewModel,
                     onClick = onLocationChannelsClick
-                )
+                )*/
 
                 // Bookmark toggle for current geohash (not shown for mesh)
                 val currentGeohash: String? = when (val sc = selectedLocationChannel) {

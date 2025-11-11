@@ -25,6 +25,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.zIndex
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material3.OutlinedButton
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.ui.media.FullScreenImageViewer
 
@@ -127,7 +129,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .height(headerHeight)
             )
-
+          if  ( isConnected){
             // Messages area - takes up available space, will compress when keyboard appears
             MessagesList(
                 messages = displayMessages,
@@ -238,6 +240,56 @@ fun ChatScreen(viewModel: ChatViewModel) {
                 showMediaButtons = showMediaButtons
             )
         }
+          else {
+              // --- PLACEHOLDER: SHOWN WHEN NOT CONNECTED ---
+
+              Box(
+                  modifier = Modifier
+                      .fillMaxWidth()
+                      .weight(1f), // This makes the box take up all available vertical space
+                  contentAlignment = Alignment.Center
+              ) {
+                  Column(
+                      horizontalAlignment = Alignment.CenterHorizontally,
+                      verticalArrangement = Arrangement.Center
+                  ) {
+                      Text(
+                          text = "Connect with a peer",
+                          style = MaterialTheme.typography.titleMedium,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant
+                      )
+                      Spacer(modifier = Modifier.height(8.dp))
+                      Text(
+                          text = "For secure offline chat and payments",
+                          style = MaterialTheme.typography.bodyMedium,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant
+                      )
+
+                      // Add a spacer for visual separation
+                      Spacer(modifier = Modifier.height(24.dp))
+
+                      // The new button to show nearby devices
+                      OutlinedButton(
+                          onClick = { viewModel.showSidebar() } // This action opens the sidebar
+                      ) {
+                          // Using a Row to place an icon next to the text
+                          Row(
+                              verticalAlignment = Alignment.CenterVertically
+                          ) {
+                              Icon(
+                                  imageVector = Icons.Default.Group,
+                                  contentDescription = "Find Nearby Devices"
+                              )
+                              Spacer(Modifier.width(8.dp))
+                              Text("Find Nearby Devices")
+                          }
+                      }
+                  }
+              }
+          }
+
+// ... rest of the file
+          }
 
         // Floating header - positioned absolutely at top, ignores keyboard
         ChatFloatingHeader(

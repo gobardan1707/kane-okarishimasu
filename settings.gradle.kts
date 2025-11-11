@@ -15,6 +15,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "bitchat-android"
+
+rootProject.name = "KANE-android"
 include(":app")
 // Using published Arti AAR; local module not included
