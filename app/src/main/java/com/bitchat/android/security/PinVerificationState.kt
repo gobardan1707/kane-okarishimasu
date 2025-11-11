@@ -51,12 +51,14 @@ data class PinSession(
  * @property status Current verification status
  * @property pin The PIN code (only populated for initiator)
  * @property peerID The peer being verified
+ * @property sessionId The session ID for this verification (from the request)
  * @property errorMessage Optional error message if verification failed
  */
 data class PinVerificationUIState(
     val status: PinVerificationStatus = PinVerificationStatus.NOT_REQUIRED,
     val pin: String? = null,
     val peerID: String? = null,
+    val sessionId: String? = null,
     val errorMessage: String? = null
 )
 

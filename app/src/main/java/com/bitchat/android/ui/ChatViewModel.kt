@@ -315,7 +315,8 @@ class ChatViewModel(
                 _pinVerificationUIState.value = com.bitchat.android.security.PinVerificationUIState(
                     status = com.bitchat.android.security.PinVerificationStatus.PENDING_INITIATOR,
                     pin = session.pin,
-                    peerID = peerID
+                    peerID = peerID,
+                    sessionId = session.sessionId
                 )
                 Log.d(TAG, "Showing PIN ${session.pin} for verification with $peerID")
             } else {
@@ -360,18 +361,15 @@ class ChatViewModel(
     fun submitPin(enteredPin: String) {
         val currentState = _pinVerificationUIState.value
         val initiatorPeerID = currentState.peerID
+        val sessionId = currentState.sessionId
 
         if (initiatorPeerID == null) {
             Log.e(TAG, "Cannot submit PIN - no initiator peer ID")
             return
         }
 
-        // Get the session ID from PinVerificationManager
-        val session = com.bitchat.android.security.PinVerificationManager.getSessionForPeer(meshService.myPeerID)
-        val sessionId = session?.sessionId
-
         if (sessionId == null) {
-            Log.e(TAG, "Cannot submit PIN - no active session found")
+            Log.e(TAG, "Cannot submit PIN - no session ID in state")
             _pinVerificationUIState.value = currentState.copy(
                 errorMessage = "No active verification session"
             )
@@ -801,6 +799,7 @@ class ChatViewModel(
         _pinVerificationUIState.value = com.bitchat.android.security.PinVerificationUIState(
             status = com.bitchat.android.security.PinVerificationStatus.PENDING_RESPONDER,
             peerID = initiatorPeerID,
+            sessionId = sessionId,
             errorMessage = null
         )
     }
